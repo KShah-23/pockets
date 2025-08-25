@@ -16,8 +16,16 @@ body {
 }
 #simContainer {
   width: 100%;
-  height: 80vh;
+  height: 60vh;
   display: block;
+}
+canvas {
+  display: block;
+  margin: 0 auto;
+}
+#status {
+  margin-top: 10px;
+  font-size: 1.2em;
 }
 input[type=range] {
   width: 150px;
@@ -34,18 +42,26 @@ button {
 <div id="controls">
   <label>Thrust: <input type="range" id="thrustSlider" min="0" max="0.1" step="0.005" value="0.03"></label>
   <label>Mass: <input type="range" id="massSlider" min="0.5" max="5" step="0.1" value="1"></label>
-  <button id="launchBtn">Launch Rocket</button>
+  <button id="launchBtn">Launch</button>
+  <button id="resetBtn">Reset</button>
 </div>
 
 <div id="simContainer"></div>
+<canvas id="graph" width="600" height="150"></canvas>
+<div id="status">Altitude: 0 | Status: Ready</div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 <script>
 const container = document.getElementById("simContainer");
 const launchBtn = document.getElementById("launchBtn");
+const resetBtn = document.getElementById("resetBtn");
 const thrustSlider = document.getElementById("thrustSlider");
 const massSlider = document.getElementById("massSlider");
+const status = document.getElementById("status");
+const graph = document.getElementById("graph");
+const ctx = graph.getContext("2d");
 
+// THREE.js setup
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000022);
 const camera = new THREE.PerspectiveCamera(75, container.clientWidth/container.clientHeight, 0.1, 1000);
@@ -79,31 +95,88 @@ ground.rotation.x = Math.PI/2;
 ground.position.y = -2.5;
 scene.add(ground);
 
+// Trail particles
+const trailParticles = [];
+const trailMaterial = new THREE.MeshBasicMaterial({color:0xffff00});
+const particleGeometry = new THREE.SphereGeometry(0.05,6,6);
+
 // Variables
 let velocity = 0;
 let launched = false;
+let altitudeData = [];
 const gravity = -0.0098;
+const targetAltitude = 15;
 
 launchBtn.addEventListener("click", () => {
   velocity = 0;
   rocket.position.y = 0;
   launched = true;
+  altitudeData = [];
+  status.innerText = "Altitude: 0 | Status: Launched 🚀";
 });
 
+resetBtn.addEventListener("click", () => {
+  velocity = 0;
+  rocket.position.y = 0;
+  launched = false;
+  altitudeData = [];
+  // remove trail
+  trailParticles.forEach(p=>scene.remove(p));
+  trailParticles.length = 0;
+  status.innerText = "Altitude: 0 | Status: Ready";
+});
+
+// Animate function
 function animate() {
   requestAnimationFrame(animate);
   if(launched){
     const thrust = parseFloat(thrustSlider.value);
     const mass = parseFloat(massSlider.value);
-    velocity += (thrust + gravity) / mass;
+    velocity += (thrust + gravity)/mass;
     rocket.position.y += velocity;
+
+    // Camera follows rocket
+    camera.position.y = rocket.position.y + 5;
+
+    // Trail particle
+    const particle = new THREE.Mesh(particleGeometry, trailMaterial);
+    particle.position.set(rocket.position.x, rocket.position.y-2.5, rocket.position.z);
+    scene.add(particle);
+    trailParticles.push(particle);
+    if(trailParticles.length > 100) {
+      scene.remove(trailParticles.shift());
+    }
+
+    // Altitude graph
+    altitudeData.push(rocket.position.y);
+    if(altitudeData.length > graph.width) altitudeData.shift();
+    drawGraph();
+
+    // Status check
+    if(rocket.position.y >= targetAltitude){
+      status.innerText = `Altitude: ${rocket.position.y.toFixed(2)} | Status: Success ✅`;
+      launched = false;
+    }
     if(rocket.position.y < 0){
       rocket.position.y = 0;
-      velocity = 0;
+      status.innerText = `Altitude: 0 | Status: Failed ❌`;
       launched = false;
     }
   }
   renderer.render(scene, camera);
+}
+
+function drawGraph(){
+  ctx.fillStyle = "#222";
+  ctx.fillRect(0,0,graph.width,graph.height);
+  ctx.strokeStyle = "#0f0";
+  ctx.beginPath();
+  altitudeData.forEach((y,i)=>{
+    const graphY = graph.height - Math.min(y/targetAltitude,1)*graph.height;
+    if(i===0) ctx.moveTo(i,graphY);
+    else ctx.lineTo(i,graphY);
+  });
+  ctx.stroke();
 }
 
 animate();
@@ -117,3 +190,4 @@ window.addEventListener('resize', () => {
 </script>
 </body>
 </html>
+
