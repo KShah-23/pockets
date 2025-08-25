@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pitchable Rocket Simulator</title>
+  <style>
+    :root{--bg:#0b1220;--card:#0f1724;--muted:#9aa4b2;--accent:#00c2ff;--glass:rgba(255,255,255,0.03)}
+    body{margin:0;font-family:Inter,Segoe UI,Roboto,system-ui,Arial;background:linear-gradient(180deg,#071027,#071634);color:#e6eef6}
+    header{padding:18px 24px;display:flex;align-items:center;gap:12px}
+    h1{margin:0;font-size:20px}
+    .wrap{display:grid;grid-template-columns:360px 1fr;gap:18px;padding:12px 18px}
+    .panel{background:var(--card);border-radius:10px;padding:12px;box-shadow:0 6px 20px rgba(2,6,23,0.6)}
+    label{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}
+    input[type=number], select{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:var(--glass);color:#fff;font-size:14px}
+    input[type=range]{width:100%}
+    .row{display:flex;gap:8px}
+    .small{font-size:13px;color:var(--muted)}
+    button{background:linear-gradient(90deg,var(--accent),#6be6ff);border:0;padding:8px 12px;border-radius:8px;color:#012;cursor:pointer;font-weight:700}
+    button.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06);color:#cfe8ff}
+    .canvasWrap{position:relative;height:420px;border-radius:8px;overflow:hidden}
+    canvas{display:block;background:linear-gradient(180deg,#08122b,#07132a);width:100%;height:420px}
+    .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px}
+    .metric{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:10px;border-radius:8px}
+    .charts{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+    .hint{font-size:13px;color:var(--muted);margin-top:6px}
+    footer{padding:10px 18px;color:var(--muted);font-size:13px}
+    .presetRow{display:flex;gap:8px;margin-top:6px}
+    @media(max-width:980px){.wrap{grid-template-columns:1fr;}}
+  </style>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Pitchable Rocket Simulator — Browser (RK4, Isp, staging)</h1>
+  </header>
+
+  <div class="wrap">
+    <!-- Controls -->
+    <div class="panel">
+      <div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
+        <div>
+          <strong>Vehicle & Engine</strong>
+          <div class="small">Editable engineering parameters (simulation-only)</div>
+        </div>
+        <div>
+          <button id="startBtn">Start</button>
+          <button class="secondary" id="pauseBtn">Pause</button>
+          <button class="secondary" id="resetBtn">Reset</button>
+        </div>
+      </div>
+
+      <hr style="border:none;height:8px">
+
+      <label>Launch angle (deg) — 90 = vertical</label>
+      <input id="angle" type="range" min="30" max="90" value="90" />
+      <div class="row" style="margin-top:8px">
+        <div style="flex:1">
+          <label>Diameter (m)</label><input id="diam" type="number" step="0.01" value="0.10" />
+        </div>
+        <div style="flex:1">
+          <label>Payload (kg)</label><input id="payload" type="number" step="0.01" value="0.5" />
+        </div>
+      </div>
+
+      <hr style="border:none;height:8px">
+
+      <label><strong>Stage 1 (main)</strong></label>
+      <div class="row">
+        <div style="flex:1">
+          <label>Thrust (N)</label><input id="thrust" type="number" step="1" value="280" />
+        </div>
+        <div style="flex:1">
+          <label>Isp (s)</label><input id="isp" type="number" step="1" value="220" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div style="flex:1">
+          <label>Prop mass (kg)</label><input id="prop" type="number" step="0.01" value="1.0" />
+        </div>
+        <div style="flex:1">
+          <label>Dry mass (kg)</label><input id="dry" type="number" step="0.01" value="4.0" />
+        </div>
+      </div>
+      <label>Burn time (s)</label>
+      <input id="burn" type="number" step="0.01" value="2.4" />
+
+      <hr style="border:none;height:8px">
+
+      <label><strong>Recovery</strong></label>
+      <div class="row">
+        <div style="flex:1">
+          <label><input id="chuteEnable" type="checkbox" checked /> Deploy parachute at apogee</label>
+        </div>
+        <div style="flex:1">
+          <label>Chute area (m²)</label><input id="chuteArea" type="number" step="0.01" value="0.6" />
+        </div>
+      </div>
+      <label>Chute Cd</label>
+      <input id="chuteCd" type="number" step="0.1" value="1.5" />
+
+      <hr style="border:none;height:8px">
+
+      <label><strong>Environment & sim</strong></label>
+      <div class="row">
+        <div style="flex:1">
+          <label>Body Cd</label><input id="bodyCd" type="number" step="0.01" value="0.5" />
+        </div>
+        <div style="flex:1">
+          <label>Time step (s)</label><input id="dt" type="number" step="0.001" value="0.02" />
+        </div>
+      </div>
+
+      <div class="presetRow">
+        <button id="presetConcept">Preset: 1.5 m Concept</button>
+        <button id="exportCSV">Export CSV</button>
+      </div>
+
+      <div class="hint">Tip: tweak thrust / Isp / prop mass to see the effect on apogee & velocity. Use Export CSV for slide graphs.</div>
+    </div>
+
+    <!-- Display area -->
+    <div>
+      <div class="panel canvasWrap">
+        <canvas id="scene"></canvas>
+        <!-- simple overlay metrics -->
+        <div style="position:absolute;top:12px;left:12px;color:#cfe8ff">
+          <div style="background:rgba(2,6,23,0.6);padding:8px;border-radius:8px">
+            <div class="small">Apogee</div><div id="apogee" style="font-weight:800">0 m</div>
+            <div class="small">Peak Velocity</div><div id="vmax" style="font-weight:800">0 m/s</div>
+            <div class="small">Simulation time</div><div id="simTime" style="font-weight:800">0 s</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel charts">
+        <div>
+          <canvas id="altChart"></canvas>
+        </div>
+        <div>
+          <canvas id="velChart"></canvas>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:12px;margin-top:12px">
+        <div class="panel" style="flex:1">
+          <strong>Key numbers</strong>
+          <div class="metrics" style="margin-top:8px">
+            <div class="metric"><div class="small">Final mass (kg)</div><div id="finalMass">-</div></div>
+            <div class="metric"><div class="small">Burnout Δv (m/s)</div><div id="dv">-</div></div>
+            <div class="metric"><div class="small">Burn time (s)</div><div id="burnTime">-</div></div>
+            <div class="metric"><div class="small">Notes</div><div id="notes">Simulation-only</div></div>
+          </div>
+        </div>
+
+        <div class="panel" style="width:360px">
+          <strong>Presets & actions</strong>
+          <div style="margin-top:8px">
+            <div class="presetRow">
+              <button id="presetBalloon" class="secondary">Near-space balloon payload</button>
+              <button id="presetHigh" class="secondary">Higher-thrust demo</button>
+            </div>
+            <div style="margin-top:8px;color:var(--muted)">Deploy to GitHub Pages or Netlify to share a clickable link. Use Export CSV for graphs in your pitch deck.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>Simulation is conceptual; no hardware instructions. For pitch use only.</footer>
+
+<script>
+/* -----------------------
+   Physics & integration
+   ----------------------- */
+const g0 = 9.81;
+const rho0 = 1.225;
+const H = 8500;
+
+function rhoAtAlt(h){ return rho0 * Math.exp(-h / H); }
+
+// RK4 integrator for 2D state: [x,z,vx,vz]
+// thrustVec is [Fx,Fz], mass in kg, Cd scalar, area m^2
+function rk4Step(state, dt, thrustVec, mass, Cd, area){
+  const deriv = (s) => {
+    const x = s[0], z = s[1], vx = s[2], vz = s[3];
+    const v = Math.hypot(vx, vz);
+    const rho = rhoAtAlt(Math.max(0,z));
+    const D = 0.5 * rho * v * v * Cd * area;
+    const dragX = v > 1e-9 ? -D * (vx / v) : 0;
+    const dragZ = v > 1e-9 ? -D * (vz / v) : 0;
+    const ax = (thrustVec[0] + dragX) / mass;
+    const az = (thrustVec[1] + dragZ - mass*g0) / mass;
+    return [vx, vz, ax, az];
+  };
+  const s = state;
+  const k1 = deriv(s);
+  const s2 = s.map((v,i)=> v + 0.5*dt*k1[i]);
+  const k2 = deriv(s2);
+  const s3 = s.map((v,i)=> v + 0.5*dt*k2[i]);
+  const k3 = deriv(s3);
+  const s4 = s.map((v,i)=> v + dt*k3[i]);
+  const k4 = deriv(s4);
+  const next = s.map((v,i)=> v + (dt/6)*(k1[i] + 2*k2[i] + 2*k3[i] + k4[i]));
+  // prevent underground negative z
+  if(next[1] < 0){ next[1] = 0; next[2] = 0; next[3] = 0; }
+  return next;
+}
+
+/* -----------------------
+   App state & DOM helpers
+   ----------------------- */
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+function resizeCanvas(){ canvas.width = canvas.clientWidth; canvas.height = canvas.clientHeight; }
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// charts
+let altChart, velChart;
+function createCharts(){
+  const altCtx = document.getElementById('altChart').getContext('2d');
+  const velCtx = document.getElementById('velChart').getContext('2d');
+  if(altChart) altChart.destroy();
+  if(velChart) velChart.destroy();
+  altChart = new Chart(altCtx, {
+    type:'line',
+    data:{datasets:[{label:'Altitude (m)',data:[],borderColor:'#6be6ff',pointRadius:0}]},
+    options:{animation:false,scales:{x:{type:'linear',title:{display:true,text:'Time (s)'}},y:{title:{display:true,text:'Altitude (m)'}}}}
+  });
+  velChart = new Chart(velCtx, {
+    type:'line',
+    data:{datasets:[
+      {label:'Velocity (m/s)',data:[],borderColor:'#ffd166',pointRadius:0}
+    ]},
+    options:{animation:false,scales:{x:{type:'linear',title:{display:true,text:'Time (s)'}},y:{title:{display:true,text:'Velocity (m/s)'}}}}
+  });
+}
+createCharts();
+
+/* DOM elements */
+const startBtn = document.getElementById('startBtn'), pauseBtn = document.getElementById('pauseBtn'), resetBtn = document.getElementById('resetBtn');
+const angleEl = document.getElementById('angle'), diamEl = document.getElementById('diam'), payloadEl = document.getElementById('payload');
+const thrustEl = document.getElementById('thrust'), ispEl = document.getElementById('isp'), propEl = document.getElementById('prop'), dryEl = document.getElementById('dry'), burnEl = document.getElementById('burn');
+const chuteEnableEl = document.getElementById('chuteEnable'), chuteAreaEl = document.getElementById('chuteArea'), chuteCdEl = document.getElementById('chuteCd');
+const bodyCdEl = document.getElementById('bodyCd'), dtEl = document.getElementById('dt'), presetConcept = document.getElementById('presetConcept');
+const exportCSVBtn = document.getElementById('exportCSV'), apogeeEl = document.getElementById('apogee'), vmaxEl = document.getElementById('vmax'), simTimeEl = document.getElementById('simTime');
+const finalMassEl = document.getElementById('finalMass'), dvEl = document.getElementById('dv'), burnTimeEl = document.getElementById('burnTime');
+const presetBalloon = document.getElementById('presetBalloon'), presetHigh = document.getElementById('presetHigh');
+
+let simState = {
+  running:false, t:0, dt:0.02,
+  records:[], // time-series
+  // dynamic variables
+  state:[0,0,0,0], // x,z,vx,vz
+  mass:0,
+  stageIdx:0, stagePropRemaining:0, stageTime:0,
+  apogeeReached:false, chuteDeployed:false, peakV:0, peakH:0
+};
+
+/* preset loader */
+function loadConcept(){
+  diamEl.value = 0.10;
+  payloadEl.value = 0.5;
+  thrustEl.value = 280;
+  ispEl.value = 220;
+  propEl.value = 1.0;
+  dryEl.value = 4.0;
+  burnEl.value = 2.4;
+  bodyCdEl.value = 0.5;
+  dtEl.value = 0.02;
+  chuteAreaEl.value = 0.6;
+  chuteCdEl.value = 1.5;
+  angleEl.value = 90;
+}
+function loadBalloonPreset(){
+  // Not a rocket — show near-space payload config as a contrast preset
+  diamEl.value = 0.30; payloadEl.value = 0.5; thrustEl.value = 10; ispEl.value = 100; propEl.value = 0.2; dryEl.value = 2.0; burnEl.value = 1.0;
+}
+function loadHigh(){
+  diamEl.value = 0.12; payloadEl.value = 0.2; thrustEl.value = 1200; ispEl.value = 250; propEl.value = 3.0; dryEl.value = 6.0; burnEl.value = 3.0;
+}
+
+/* -----------------------
+   Simulation lifecycle
+   ----------------------- */
+function prepareSim(){
+  // read UI values
+  const diam = parseFloat(diamEl.value);
+  const payload = parseFloat(payloadEl.value);
+  const thrust = parseFloat(thrustEl.value);
+  const isp = parseFloat(ispEl.value);
+  const propMass = parseFloat(propEl.value);
+  const dryMass = parseFloat(dryEl.value);
+  const burnTime = parseFloat(burnEl.value);
+  const bodyCd = parseFloat(bodyCdEl.value);
+  const dt = Math.max(0.001, parseFloat(dtEl.value));
+  const angle = parseFloat(angleEl.value) * Math.PI/180;
+  const chuteEnable = chuteEnableEl.checked;
+  const chuteArea = parseFloat(chuteAreaEl.value);
+  const chuteCd = parseFloat(chuteCdEl.value);
+
+  // derive initial mass
+  const m0 = dryMass + propMass + payload;
+  // prepare stage single-stage (simple)
+  simState.mass = m0;
+  simState.stageIdx = 0;
+  simState.stagePropRemaining = propMass;
+  simState.stageTime = 0;
+  simState.stageThrust = thrust;
+  simState.stageIsp = isp;
+  simState.stageBurn = burnTime;
+  simState.apogeeReached = false;
+  simState.chuteDeployed = false;
+  simState.records = [];
+  simState.t = 0;
+  simState.state = [0, 0,  Math.cos(angle)*0, Math.sin(angle)*0 ]; // start on ground with zero velocity
+  simState.dt = dt;
+  simState.params = {diam, payload, thrust, isp, propMass, dryMass, burnTime, bodyCd, chuteEnable, chuteArea, chuteCd, angle};
+  simState.peakV = 0; simState.peakH = 0;
+  // charts reset
+  altChart.data.datasets[0].data = [];
+  velChart.data.datasets[0].data = [];
+  altChart.update(); velChart.update();
+}
+
+/* single simulation step */
+function simStep(){
+  const dt = simState.dt;
+  const p = simState.params;
+  // compute current thrust and massflow
+  let thrustN = 0;
+  if(simState.stageIdx === 0 && simState.stagePropRemaining > 1e-9 && simState.stageTime < p.burnTime){
+    thrustN = p.thrust;
+    // mass flow from thrust and Isp: mdot = T / (Isp * g0)
+    const mdot = (p.isp > 0) ? thrustN / (p.isp * g0) : 0;
+    const consume = Math.min(simState.stagePropRemaining, mdot * dt);
+    simState.stagePropRemaining -= consume;
+    simState.mass -= consume;
+    simState.stageTime += dt;
+    if(simState.stagePropRemaining <= 1e-9 || simState.stageTime >= p.burnTime){
+      // stage burnout: jettison dry mass (approx)
+      simState.mass -= p.dryMass;
+      simState.stageIdx = 1; // move to coast
+    }
+  } else {
+    thrustN = 0;
+  }
+
+  // thrust vector aligned with launch angle (static for this sim)
+  const thrustVec = [ Math.cos(p.angle) * thrustN, Math.sin(p.angle) * thrustN ];
+
+  // approximate reference area
+  const areaRef = Math.PI * Math.pow(p.diam/2, 2);
+
+  // choose Cd / area (parachute if deployed)
+  const Cd = simState.chuteDeployed ? p.chuteCd : p.bodyCd;
+  const area = simState.chuteDeployed ? p.chuteArea : areaRef;
+
+  // RK4 integration step
+  const s = simState.state;
+  const next = rk4Step(s, dt, thrustVec, simState.mass, Cd, area);
+  simState.state = next;
+  simState.t += dt;
+
+  // diagnostics
+  const z = next[1];
+  const v = Math.hypot(next[2], next[3]);
+  if(v > simState.peakV) simState.peakV = v;
+  if(z > simState.peakH) simState.peakH = z;
+
+  // apogee detection
+  simState.records.push({t: simState.t, x: next[0], z: next[1], vx: next[2], vz: next[3], m: simState.mass, thrust: thrustN});
+  const n = simState.records.length;
+  if(!simState.apogeeReached && n > 3){
+    const a = simState.records[n-3].z, b = simState.records[n-2].z, c = simState.records[n-1].z;
+    if(b > a && b > c){ // local maxima
+      simState.apogeeReached = true;
+      if(p.chuteEnable) simState.chuteDeployed = true;
+    }
+  }
+
+  // stop if landed after apogee
+  if(simState.apogeeReached && simState.state[1] <= 0.001){
+    simState.running = false;
+    updateUIFinal();
+  }
+
+  // safety: stop if sim time too long
+  if(simState.t > 1000){ simState.running = false; updateUIFinal(); }
+}
+
+/* render scene */
+function renderScene(){
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0,0,w,h);
+  // ground
+  ctx.fillStyle = '#07101a';
+  ctx.fillRect(0, h-60, w, 60);
+  // draw scale: map altitude to pixels (auto scale)
+  const maxH = Math.max(200, simState.peakH*1.4, 400);
+  const pixelsPerM = (h-80) / maxH;
+  // draw rocket
+  const rocketX = w/2 + simState.state[0]; // x offset not used deeply
+  const rocketY = h-60 - simState.state[1]*pixelsPerM;
+  // rocket body
+  ctx.save();
+  ctx.translate(rocketX, rocketY);
+  // draw rocket body
+  ctx.fillStyle = '#e6eef6';
+  ctx.fillRect(-6, -30, 12, 30);
+  // nose
+  ctx.beginPath(); ctx.moveTo(-6,-30); ctx.lineTo(6,-30); ctx.lineTo(0,-44); ctx.closePath();
+  ctx.fill();
+  // flame (if thrust)
+  const last = simState.records[simState.records.length-1];
+  if(last && last.thrust > 1){
+    const tnorm = Math.min(1, last.thrust/1000);
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(255, ${120 + Math.floor(100*tnorm)}, 50, 0.95)`;
+    ctx.moveTo(-6,0); ctx.quadraticCurveTo(-12, 10+40*tnorm, 0, 30+60*tnorm); ctx.quadraticCurveTo(12, 10+40*tnorm, 6,0);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // HUD axis right side
+  ctx.fillStyle = '#9fb8d6';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('Altitude (m): ' + simState.state[1].toFixed(1), 12, 18);
+  ctx.fillText('Velocity (m/s): ' + Math.hypot(simState.state[2], simState.state[3]).toFixed(2), 12, 36);
+  ctx.fillText('Mass (kg): ' + simState.mass.toFixed(3), 12, 54);
+}
+
+/* update charts from last record */
+function updateCharts(){
+  const recs = simState.records;
+  altChart.data.datasets[0].data = recs.map(r=>({x:r.t, y:r.z}));
+  velChart.data.datasets[0].data = recs.map(r=>({x:r.t, y:Math.hypot(r.vx, r.vz)}));
+  altChart.update('none'); velChart.update('none');
+}
+
+/* UI updates for final numbers */
+function updateUIFinal(){
+  apogeeEl.innerText = simState.peakH.toFixed(1) + ' m';
+  vmaxEl.innerText = simState.peakV.toFixed(2) + ' m/s';
+  simTimeEl.innerText = simState.t.toFixed(2) + ' s';
+  finalMassEl.innerText = simState.mass.toFixed(3) + ' kg';
+  const initialMass = parseFloat(dryEl.value) + parseFloat(propEl.value) + parseFloat(payloadEl.value);
+  const dv = computeBurnDV();
+  dvEl.innerText = dv.toFixed(1) + ' m/s';
+  burnTimeEl.innerText = burnEl.value + ' s';
+}
+
+/* compute idealized Δv from Tsiolkovsky (uses Isp & prop mass) */
+function computeBurnDV(){
+  const isp = parseFloat(ispEl.value);
+  const m0 = parseFloat(dryEl.value) + parseFloat(propEl.value) + parseFloat(payloadEl.value);
+  const mf = parseFloat(dryEl.value) + parseFloat(payloadEl.value);
+  if(isp <= 0 || m0 <= mf) return 0;
+  return isp * g0 * Math.log(m0 / mf);
+}
+
+/* export CSV */
+function exportCSV(){
+  const recs = simState.records;
+  const header = 'time_s,x_m,altitude_m,vx_mps,vz_mps,mass_kg,thrust_N';
+  const body = recs.map(r=>`${r.t.toFixed(3)},${r.x.toFixed(4)},${r.z.toFixed(4)},${r.vx.toFixed(4)},${r.vz.toFixed(4)},${r.m.toFixed(6)},${r.thrust.toFixed(3)}`).join('\n');
+  const csv = header + '\n' + body;
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'rocket_sim.csv'; a.click(); URL.revokeObjectURL(url);
+}
+
+/* main loop */
+function loop(){
+  if(simState.running){
+    // run a few steps per frame (speed up)
+    for(let i=0;i<2;i++){
+      simStep();
+    }
+    updateCharts();
+    renderScene();
+    requestAnimationFrame(loop);
+  } else {
+    renderScene();
+  }
+}
+
+/* button hookups */
+startBtn.addEventListener('click', ()=>{
+  if(!simState.running){
+    prepareSim();
+    simState.running = true;
+    loop();
+  }
+});
+pauseBtn.addEventListener('click', ()=>{
+  simState.running = !simState.running;
+  if(simState.running) loop();
+});
+resetBtn.addEventListener('click', ()=>{
+  simState.running = false;
+  prepareSim();
+  updateCharts();
+  renderScene();
+  apogeeEl.innerText = '0 m'; vmaxEl.innerText = '0 m/s'; simTimeEl.innerText = '0 s';
+  finalMassEl.innerText = '-'; dvEl.innerText = '-'; burnTimeEl.innerText = '-';
+});
+
+/* presets & export */
+presetConcept.addEventListener('click', ()=>{ loadConcept(); resetBtn.click(); });
+presetBalloon.addEventListener('click', ()=>{ loadBalloonPreset(); resetBtn.click(); });
+presetHigh.addEventListener('click', ()=>{ loadHigh(); resetBtn.click(); });
+exportCSVBtn.addEventListener('click', exportCSV);
+
+function loadConcept(){ diamEl.value=0.10; payloadEl.value=0.5; thrustEl.value=280; ispEl.value=220; propEl.value=1.0; dryEl.value=4.0; burnEl.value=2.4; bodyCdEl.value=0.5; dtEl.value=0.02; chuteAreaEl.value=0.6; chuteCdEl.value=1.5; angleEl.value=90; }
+function loadBalloonPreset(){ diamEl.value=0.30; payloadEl.value=0.5; thrustEl.value=10; ispEl.value=100; propEl.value=0.2; dryEl.value=2.0; burnEl.value=1.0; angleEl.value=90; }
+function loadHigh(){ diamEl.value=0.12; payloadEl.value=0.2; thrustEl.value=1200; ispEl.value=250; propEl.value=3.0; dryEl.value=6.0; burnEl.value=3.0; angleEl.value=80; }
+
+/* initial prep */
+loadConcept();
+prepareSim();
+renderScene();
+</script>
+</body>
+</html>
